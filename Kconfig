@@ -37,7 +37,7 @@ config TX_TRANSMISSIONS
 	help
 	   Transmissions before sample exits, use 0 to transmit forever.
 
-config RX_PERIOD_S
+config RX_PERIOD_MS
 	int "RX period"
 	default 5
 	help
