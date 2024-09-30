@@ -4,42 +4,92 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 #include <string.h>
-#include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/logging/log.h>
+#include <inttypes.h>
 #include <nrf_modem_dect_phy.h>
 #include <modem/nrf_modem_lib.h>
-#include <zephyr/drivers/hwinfo.h>
 
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/printk.h>
-#include <inttypes.h>
+#include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(app);
+LOG_MODULE_REGISTER(dr_test);
 
-#define NUM_OF_TX 2000
-int num_of_tx_recieved = 0;
-int time_since_last_tx_recieved = 0;
+#define TX_HANDLE 0
+#define RX_HANDLE 1
+#define MAX_MCS 4
+#define MAX_NUM_OF_SUBSLOTS 6
+#define MAX_DATA_LEN 4832
+#define SUBSLOTS_USED 6
 
-uint32_t tx_handle = 0;
-uint32_t rx_handle = 1;
+const int mcs_subslots_size[MAX_MCS + 1][MAX_NUM_OF_SUBSLOTS + 1] = {
+	{0,
+	 136,
+	 264,
+	 400,
+	 536,
+	 664,
+	 792},
+	{32,
+	 296,
+	 552,
+	 824,
+	 1096,
+	 1352,
+	 1608},
+	{56,
+	 456,
+	 856,
+	 1256,
+	 1640,
+	 2024,
+	 2360},
+	{88,
+	 616,
+	 1128,
+	 1672,
+	 2168,
+	 2680,
+	 3192},
+	{144,
+	 936,
+	 1736,
+	 2488,
+	 3256,
+	 4024,
+	 4832}};
 
+// if this is the error, include overlay-eu.proj/overlay-us.proj into build
 BUILD_ASSERT(CONFIG_CARRIER, "Carrier must be configured according to local regulations");
-
-#define DATA_LEN_MAX 32
 
 static bool exit;
 static uint16_t device_id;
 
+enum TestStatus
+{
+	NotRunning,
+	Scheduled,
+	Running,
+	Ended,
+};
+
 // is only recieving
-bool is_rx = false;
+static bool is_rx = false;
 // has sent data at least once (if yes, then it will never recieve)
-bool is_sending = false;
-// got back data from reciever, so can send again
-bool can_send_tx = true;
-// if recieving, send statistics to sender
-bool send_data = false;
+static bool has_sent = false;
+static enum TestStatus current_test_status = NotRunning;
+static int num_of_tx_recieved = 0;
+static int current_mcs = 0;
+int tx_buf[MAX_DATA_LEN];
+
+bool respond_to_test_start_as_rx = false;
+bool send_statistics_back = false;
+
+static int devices_in_test = 0;
+static int responses_received = 0;
 
 /* Semaphore to synchronize modem calls. */
 K_SEM_DEFINE(operation_sem, 0, 1);
@@ -59,21 +109,34 @@ struct phy_ctrl_field_common
 	uint32_t pad : 24;
 };
 
+enum TestHeaderType
+{
+	// send by tx node to start test
+	ScheduleTest,
+	// rx answers to ScheduleTest so tx knows how many participants
+	StartTest,
+	Testing,
+	// tx sends to signal end of test
+	EndTest,
+	// rx responds with results
+	TestResults,
+};
+
 /* Send operation. */
-static int transmit(uint32_t handle, void *data, size_t data_len)
+static int transmit(uint32_t handle, void *data, size_t data_len, int mcs)
 {
 	int err;
 
 	struct phy_ctrl_field_common header = {
 		.header_format = 0x0,
 		.packet_length_type = 0x0,
-		.packet_length = 0x01,
+		.packet_length = SUBSLOTS_USED,
 		.short_network_id = (CONFIG_NETWORK_ID & 0xff),
 		.transmitter_id_hi = (device_id >> 8),
 		.transmitter_id_lo = (device_id & 0xff),
 		.transmit_power = CONFIG_TX_POWER,
 		.reserved = 0,
-		.df_mcs = CONFIG_MCS,
+		.df_mcs = mcs,
 	};
 
 	struct nrf_modem_dect_phy_tx_params tx_op_params = {
@@ -130,16 +193,10 @@ static int receive(uint32_t handle, uint32_t duration_ms)
 /* Timers*/
 extern void set_rx_or_tx(struct k_timer *timer_id)
 {
-	is_rx = !is_sending;
-}
-
-extern void send_end_data(struct k_timer *timer_id)
-{
-	send_data = num_of_tx_recieved != 0;
+	is_rx = !has_sent;
 }
 
 K_TIMER_DEFINE(rxtx_timer, set_rx_or_tx, NULL);
-K_TIMER_DEFINE(last_msg_timer, send_end_data, NULL);
 
 /* Button and led initialization */
 #define SW0_NODE DT_ALIAS(sw0)
@@ -213,29 +270,94 @@ static void pdc(const uint64_t *time,
 				const struct nrf_modem_dect_phy_rx_pdc_status *status,
 				const void *data, uint32_t len)
 {
-	// if msg is statistics (starts with M)
-	if (((char *)data)[0] == 'M')
+	gpio_pin_set_dt(&led, 0);
+	enum TestHeaderType header_type = (enum TestHeaderType)((int *)data)[0];
+	// LOG_INF("L: %d", len);
+	if (len == 600 || num_of_tx_recieved == 600)
 	{
-		if (is_rx)
-			return;
-		LOG_INF("%s", (char *)data);
-		// turn of the led if you are sending, if you are reading the led should still be on
-		gpio_pin_set_dt(&led, is_rx);
-		can_send_tx = true;
-		return;
+
+		for (int j = 0; j < len - 8; j += 8)
+		{
+			int i = len - j;
+			printk("%d: %#10.8x%#10.8x%#10.8x%#10.8x%#10.8x%#10.8x%#10.8x%#10.8x\n", i, ((int *)data)[i], ((int *)data)[i + 1], ((int *)data)[i + 2], ((int *)data)[i + 3], ((int *)data)[i + 4], ((int *)data)[i + 5], ((int *)data)[i + 6], ((int *)data)[i + 7]);
+		}
 	}
+	// LOG_INF("Header type %d", header_type);
 	if (is_rx)
 	{
-		num_of_tx_recieved++;
-		k_timer_start(&last_msg_timer, K_MSEC(500), K_NO_WAIT);
+		switch (current_test_status)
+		{
+		case NotRunning:
+			if (header_type != ScheduleTest)
+				return;
+			current_test_status = Running;
+			respond_to_test_start_as_rx = true;
+
+			break;
+		case Scheduled:
+		case Running:
+			if (header_type == Testing)
+			{
+				num_of_tx_recieved++;
+				if (num_of_tx_recieved >= len)
+				{
+				}
+				else if (((int *)data)[num_of_tx_recieved] != 0xAB)
+				{
+				}
+				// LOG_INF("NOOOOO %d", num_of_tx_recieved);
+				else if (((int *)data)[num_of_tx_recieved] == 0xAB)
+					LOG_INF("Yesss %d", num_of_tx_recieved);
+			}
+			else if (header_type == EndTest)
+			{
+				current_test_status = NotRunning;
+				send_statistics_back = true;
+			}
+		}
 	}
-	// LOG_INF("Received data (RSSI: %d.%d): %d %s",
-	// 		(status->rssi_2 / 2), (status->rssi_2 & 0b1) * 5, num_of_tx_recieved, (char *)data);
-	// uint8_t *state = (uint8_t *)data;
-	// if (len > 0 && (*state == '0' || *state == '1'))
+	else
+	{
+		switch (current_test_status)
+		{
+		case Scheduled:
+			if (header_type == StartTest)
+			{
+				LOG_INF("Device ready to take test");
+				devices_in_test++;
+			}
+		case Ended:
+			if (header_type == TestResults)
+			{
+				LOG_INF("WAAAAAAY");
+				LOG_INF("Messages recieved: %d", ((int *)data)[1]);
+			}
+		}
+	}
+	return;
+	// // if msg is statistics (starts with M)
+	// if (((char *)data)[0] == 'M')
 	// {
-	// 	gpio_pin_set_dt(&led, *state - '0');
+	// 	if (is_rx)
+	// 		return;
+	// 	LOG_INF("%s", (char *)data);
+	// 	// turn of the led if you are sending, if you are reading the led should still be on
+	// 	gpio_pin_set_dt(&led, is_rx);
+	// 	// can_send_tx = true;
+	// 	return;
 	// }
+	// if (is_rx)
+	// {
+	// 	num_of_tx_recieved++;
+	// 	// k_timer_start(&last_msg_timer, K_MSEC(500), K_NO_WAIT);
+	// }
+	// // LOG_INF("Received data (RSSI: %d.%d): %d %s",
+	// // 		(status->rssi_2 / 2), (status->rssi_2 & 0b1) * 5, num_of_tx_recieved, (char *)data);
+	// // uint8_t *state = (uint8_t *)data;
+	// // if (len > 0 && (*state == '0' || *state == '1'))
+	// // {
+	// // 	gpio_pin_set_dt(&led, *state - '0');
+	// // }
 }
 
 /* Physical Data Channel CRC error notification. */
@@ -292,6 +414,99 @@ static struct nrf_modem_dect_phy_init_params dect_phy_init_params = {
 	.harq_rx_process_count = 4,
 };
 
+void start_test_tx(uint8_t mcs, int duration_ms)
+{
+	int err;
+	if (mcs > MAX_MCS)
+	{
+		LOG_ERR("MCS value set too high, dont have data for it");
+		return;
+	}
+	// int max_data_len = mcs_subslots_size[mcs][MAX_NUM_OF_SUBSLOTS];
+	int max_data_len = mcs_subslots_size[mcs][MAX_NUM_OF_SUBSLOTS] / 8;
+
+	tx_buf[0] = ScheduleTest;
+	tx_buf[1] = mcs;
+
+	/* Signal to start test */
+	devices_in_test = 0;
+	current_test_status = Scheduled;
+	for (int i = 0; i < 10; i++)
+	{
+		err = transmit(TX_HANDLE, (void *)tx_buf, 100, 0);
+		// err = transmit(TX_HANDLE, (void *)tx_buf, mcs_subslots_size[0][1], 0);
+		if (err != 0)
+		{
+			LOG_ERR("Error during transmition %d", err);
+			return;
+		}
+		/* Wait for TX operation to complete. */
+		k_sem_take(&operation_sem, K_FOREVER);
+		// LOG_INF("Send invitation");
+		err = receive(RX_HANDLE, 250);
+		if (err != 0)
+		{
+			LOG_ERR("Error during recieving %d", err);
+			return;
+		}
+		/* Wait for TX operation to complete. */
+		k_sem_take(&operation_sem, K_FOREVER);
+	}
+	if (devices_in_test == 0)
+	{
+		LOG_ERR("No devices to take tests with");
+		return;
+	}
+
+	current_test_status = Running;
+	tx_buf[0] = Testing;
+	int msg_send = 0;
+	LOG_INF("here");
+	int64_t current_time = k_uptime_get();
+	while (current_test_status == Running && k_uptime_get() - current_time <= duration_ms)
+	{
+		err = transmit(TX_HANDLE, (void *)tx_buf, max_data_len, mcs);
+		// err = transmit(TX_HANDLE, (void *)tx_buf, msg_send, mcs);
+		if (err != 0)
+		{
+			LOG_ERR("Error during transmition %d", err);
+			continue;
+		}
+		if (msg_send % 100 == 0)
+			LOG_INF("Sent test %d", msg_send);
+		/* Wait for TX operation to complete. */
+		k_sem_take(&operation_sem, K_FOREVER);
+		msg_send++;
+	}
+	LOG_INF("msg sent: %d", msg_send);
+	LOG_INF("msg size: %dB = %db", max_data_len, max_data_len * 8);
+	LOG_INF("Data rate: %d kb/s", ((max_data_len / 1024) * msg_send * 1000) / duration_ms);
+	responses_received = 0;
+	tx_buf[0] = EndTest;
+	current_test_status = Ended;
+	for (int i = 0; i < 10; i++)
+	{
+		if (responses_received >= devices_in_test)
+			break;
+		err = transmit(TX_HANDLE, (void *)tx_buf, 10, 0);
+		if (err != 0)
+		{
+			LOG_ERR("Error during transmition %d", err);
+			continue;
+		}
+		/* Wait for TX operation to complete. */
+		k_sem_take(&operation_sem, K_FOREVER);
+		err = receive(RX_HANDLE, 100);
+		if (err != 0)
+		{
+			LOG_ERR("Error during transmition %d", err);
+			continue;
+		}
+		/* Wait for RX operation to complete. */
+		k_sem_take(&operation_sem, K_FOREVER);
+	}
+}
+
 int main(void)
 {
 	int err;
@@ -331,8 +546,6 @@ int main(void)
 	}
 
 	/* DECT NR+ modem initialization */
-	uint8_t tx_buf[DATA_LEN_MAX];
-	size_t tx_len;
 
 	LOG_INF("Dect NR+ PHY Hello sample started");
 
@@ -372,82 +585,74 @@ int main(void)
 	{
 		LOG_ERR("nrf_modem_dect_phy_capability_get failed, err %d", err);
 	}
-	k_timer_start(&rxtx_timer, K_MSEC(10000), K_NO_WAIT);
+
+	for (int i = 0; i < 4832; i++)
+	{
+		tx_buf[i] = 0xABABABAB;
+	}
+
+	/* End of setup*/
+
+	k_timer_start(&rxtx_timer, K_MSEC(1000), K_NO_WAIT);
 	while (!is_rx)
 	{
 		int button_state;
 		int prev_button_state = 0;
 		button_state = gpio_pin_get_dt(&button);
-		if (prev_button_state != button_state && can_send_tx)
+		if (prev_button_state != button_state && current_test_status == NotRunning)
 		{
-			can_send_tx = false;
 			prev_button_state = button_state;
 			if (button_state != 1)
 			{
 				continue;
 			}
-			is_sending = true;
+			has_sent = true;
 
-			LOG_INF("Transmitting 0..%d", NUM_OF_TX);
-			for (int i = 0; i < NUM_OF_TX; i++)
-			{
-				gpio_pin_set_dt(&led, (i % 50) < 25);
-				tx_len = sprintf(tx_buf, "%d", i);
-
-				err = transmit(tx_handle, tx_buf, tx_len);
-				if (err)
-				{
-					LOG_ERR("Transmisstion failed, err %d", err);
-					return err;
-				}
-				/* Wait for TX operation to complete. */
-				k_sem_take(&operation_sem, K_FOREVER);
-			}
-			gpio_pin_set_dt(&led, 1);
+			LOG_INF("Starting TX test");
+			// gpio_pin_set_dt(&led, 1);
+			start_test_tx(4, 60 * MSEC_PER_SEC);
+			// gpio_pin_set_dt(&led, 0);
 		}
-
-		/** Receiving messages for CONFIG_RX_PERIOD_MS seconds. */
-		err = receive(rx_handle, 50);
-		if (err)
-		{
-			LOG_ERR("Reception failed, err %d", err);
-			return err;
-		}
-
-		/* Wait for RX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
 	}
 	LOG_INF("Recieving msg!");
+	gpio_pin_set_dt(&led, 1);
 	while (1)
 	{
-		gpio_pin_set_dt(&led, 1);
-		/** Receiving messages for CONFIG_RX_PERIOD_MS seconds. */
-		err = receive(rx_handle, 5 * MSEC_PER_SEC);
-		if (err)
+		if (respond_to_test_start_as_rx)
 		{
-			LOG_ERR("Reception failed, err %d", err);
-			return err;
+			respond_to_test_start_as_rx = false;
+			const int tx_len = mcs_subslots_size[0][1];
+			tx_buf[0] = StartTest;
+			transmit(TX_HANDLE, &tx_buf, 100, 0);
+			/* Wait for TX operation to complete. */
+			k_sem_take(&operation_sem, K_FOREVER);
+			// }
+			LOG_INF("Send responses");
 		}
+		else if (send_statistics_back)
+		{
+			LOG_INF("Sending statistics");
+			send_statistics_back = false;
+			tx_buf[0] = TestResults;
+			tx_buf[1] = num_of_tx_recieved;
+			tx_buf[2] = device_id >> 8;
+			tx_buf[3] = device_id & 0xff;
+			LOG_INF("msg rec: %d", num_of_tx_recieved);
 
+			transmit(TX_HANDLE, (void *)tx_buf, 100, 0);
+			/* Wait for TX operation to complete. */
+			k_sem_take(&operation_sem, K_FOREVER);
+			LOG_INF("Sending statistics");
+			num_of_tx_recieved = 0;
+		}
+		err = receive(RX_HANDLE, 100);
+		if (err != 0)
+		{
+			LOG_ERR("Error during receiving %d", err);
+			continue;
+		}
 		/* Wait for RX operation to complete. */
 		k_sem_take(&operation_sem, K_FOREVER);
-
-		if (send_data)
-		{
-			LOG_INF("Messages recieved: %d / %d", num_of_tx_recieved, NUM_OF_TX);
-			tx_len = sprintf(&tx_buf, "Messages recieved: %d / %d", num_of_tx_recieved, NUM_OF_TX);
-			err = transmit(tx_handle, (void *)tx_buf, tx_len);
-			if (err)
-			{
-				LOG_ERR("Transmition failed, err %d", err);
-				return err;
-			}
-
-			/* Wait for RX operation to complete. */
-			k_sem_take(&operation_sem, K_FOREVER);
-			num_of_tx_recieved = 0;
-			send_data = false;
-		}
 	}
 
 	LOG_INF("Shutting down");
