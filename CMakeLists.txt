@@ -9,4 +9,8 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(hello_dect)
 
+target_sources(app PRIVATE src/common.c)
+target_sources(app PRIVATE src/transmit.c)
+target_sources(app PRIVATE src/recieve.c)
+target_sources(app PRIVATE src/init.c)
 target_sources(app PRIVATE src/main.c)

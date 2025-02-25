@@ -3,210 +3,28 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
-#include <string.h>
-#include <inttypes.h>
-#include <nrf_modem_dect_phy.h>
-#include <modem/nrf_modem_lib.h>
 
-#include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/hwinfo.h>
-#include <zephyr/drivers/gpio.h>
-#include <zephyr/sys/util.h>
-#include <zephyr/sys/printk.h>
-#include <zephyr/logging/log.h>
+#include "main.h"
+#include "init.h"
+#include "common.h"
 
-LOG_MODULE_REGISTER(dr_test);
+#include "transmit.h"
+#include "recieve.h"
 
-#define TX_HANDLE 0
-#define RX_HANDLE 1
-#define MAX_MCS 4
-#define MAX_NUM_OF_SUBSLOTS 6
-#define MAX_DATA_LEN 4832
-#define SUBSLOTS_USED 6
+LOG_MODULE_REGISTER(main);
 
-const int mcs_subslots_size[MAX_MCS + 1][MAX_NUM_OF_SUBSLOTS + 1] = {
-	{0,
-	 136,
-	 264,
-	 400,
-	 536,
-	 664,
-	 792},
-	{32,
-	 296,
-	 552,
-	 824,
-	 1096,
-	 1352,
-	 1608},
-	{56,
-	 456,
-	 856,
-	 1256,
-	 1640,
-	 2024,
-	 2360},
-	{88,
-	 616,
-	 1128,
-	 1672,
-	 2168,
-	 2680,
-	 3192},
-	{144,
-	 936,
-	 1736,
-	 2488,
-	 3256,
-	 4024,
-	 4832}};
+// static Globals globals = {};
 
 // if this is the error, include overlay-eu.proj/overlay-us.proj into build
 BUILD_ASSERT(CONFIG_CARRIER, "Carrier must be configured according to local regulations");
 
 static bool exit;
-static uint16_t device_id;
+// static uint16_t device_id;
 
-enum TestStatus
-{
-	NotRunning,
-	Scheduled,
-	Running,
-	Ended,
-};
+// char tx_buf[MAX_DATA_LEN] = "Eos harum dolorum in iure aspernatur aut consectetur dolores. In quae itaque et dolorem natus quo voluptate molestias non commodi officia est laborum molestiae est vitae aliquam. Non autem ipsa ex consequuntur quae et natus tempore! Sed debitis pariatur non optio inventore sit aspernatur mollitia ut ipsa sunt a impedit nihil eum asperiores possimus est ullam quis. 33 architecto expedita eos autem quisquam ea sapiente saepe et delectus facilis et odio excepturi ad numquam iure. Aut sunt quia in nihil architecto cum explicabo sint et galisum perspiciatis. Non possimus mollitia non Quis labore eos dignissimos galisum. Qui excepturi accusamus eum tempora quibusdam et deserunt omnis qui consequuntur pariatur sit dignissimos vero est nisi distinctio est quaerat doloremque.Aut galisum vero id rerum molestiae sed dolores nihil. Ex dolor quia ut provident modi qui voluptatem iusto vel quia explicabo ut expedita quam sed quia reprehenderit aut repellat perspiciatis. Et delectus aliquid quo aspernatur quidem sit reiciendis sint. Ut molestiae consequatur ea eaque consequatur et fugiat consequatur vel suscipit dolores ad nesciunt dolorem. Non quibusdam maiores et blanditiis laborum sed vitae nemo et distinctio sunt aut dolor repudiandae. Non praesentium rerum aut voluptas error vel eius pariatur aut reprehenderit voluptatum? Et vero nemo ad amet enim et vitae veniam in optio consequatur non autem itaque eos animi expedita. Sit quis suscipit cum ipsum enim rem omnis nobis eum debitis autem. Aut similique voluptatem non recusandae quod ad reprehenderit blanditiis eos voluptate nostrum. Et distinctio doloremque non molestiae doloribus ut placeat accusamus et magnam doloremque At aliquid quia. Est quam sint non assumenda dolorem hic rerum facilis a reprehenderit voluptatibus in assumenda commodi ut provident corporis et numquam recusandae. Et dolorem architecto et deleniti autem vel Quis earum. Ut nisi maxime id beatae nostrum id magnam accusantium ad nesciunt libero! 33 incidunt rerum eum voluptatem esse qui iure odit et cupiditate sunt.Sit rerum necessitatibus rem eveniet repellat ut error sunt rem sunt tempora eum cupiditate amet non consectetur tempore. Ut amet accusantium rem sequi molestias sed inventore ipsa in ipsa voluptatem. In aliquam corrupti et ducimus dolores rem voluptatem repellat aut odit temporibus et soluta maxime. Et recusandae quia in porro laborum aut culpa tenetur. Ut tempora expedita a quia eveniet et galisum culpa et nisi fugit. Non aliquid saepe eos sequi eaque rem maiores saepe hic porro omnis ea voluptas dolores sit deserunt similique non illum rerum. Non nostrum veniam et impedit nisi vel dolor eveniet ab blanditiis nesciunt non eveniet numquam. In quos omnis non obcaecati voluptatum ea unde earum qui dolor adipisci et odio dolor! Ut galisum totam ut sint porro ab illum dolore et dolorem nostrum. Et numquam culpa aut enim labore ut quis rerum qui autem fugit a harum sapiente. Cum repellat nisi hic impedit autem aut quis similique. Et molestiae doloremque non voluptatem tenetur est quisquam totam eum fuga temporibus cum laborum obcaecati sed eveniet doloribus a voluptatibus labore. In deserunt aperiam et ducimus quisquam quo autem error. Et praesentium ipsum sit adipisci quia et sunt reprehenderit.Eos harum dolorum in iure aspernatur aut consectetur dolores. In quae itaque et dolorem natus quo voluptate molestias non commodi officia est laborum molestiae est vitae aliquam. Non autem ipsa ex consequuntur quae et natus tempore! Sed debitis pariatur non optio inventore sit aspernatur mollitia ut ipsa sunt a impedit nihil eum asperiores possimus est ullam quis. 33 architecto expedita eos autem quisquam ea sapiente saepe et delectus facilis et odio excepturi ad numquam iure. Aut sunt quia in nihil architecto cum explicabo sint et galisum perspiciatis. Non possimus mollitia non Quis labore eos dignissimos galisum. Qui excepturi accusamus eum tempora quibusdam et deserunt omnis qui consequuntur pariatur sit dignissimos vero est nisi distinctio est quaerat doloremque.Aut galisum vero id rerum molestiae sed dolores nihil. Ex dolor quia ut provident modi qui voluptatem iusto vel quia explicabo ut expedita quam sed quia reprehenderit aut repellat perspiciatis. Et delectus aliquid quo aspernatur quidem sit reiciendis sint. Ut molestiae consequatur ea eaque consequatur et fugiat consequatur vel suscipit dolores ad nesciunt dolorem. Non quibusdam maiores et blanditiis laborum sed vitae nemo et distinctio sunt aut dolor repudiandae. Non praesentium rerum aut voluptas error vel eius pariatur aut reprehenderit voluptatum? Et vero nemo ad amet enim et vitae veniam in optio consequatur non autem itaque eos animi expedita. Sit quis suscipit cum ipsum enim rem omnis nobis eum debitis autem. Aut similique voluptatem non recusandae quod ad reprehenderit.";
+char tx_buf[MAX_DATA_LEN] = {};
 
-// is only recieving
-static bool is_rx = false;
-// has sent data at least once (if yes, then it will never recieve)
-static bool has_sent = false;
-static enum TestStatus current_test_status = NotRunning;
-static int num_of_tx_recieved = 0;
-static int current_mcs = 0;
-int tx_buf[MAX_DATA_LEN];
 
-bool respond_to_test_start_as_rx = false;
-bool send_statistics_back = false;
-
-static int devices_in_test = 0;
-static int responses_received = 0;
-
-/* Semaphore to synchronize modem calls. */
-K_SEM_DEFINE(operation_sem, 0, 1);
-
-/* Header type 1, due to endianness the order is different than in the specification. */
-struct phy_ctrl_field_common
-{
-	uint32_t packet_length : 4;
-	uint32_t packet_length_type : 1;
-	uint32_t header_format : 3;
-	uint32_t short_network_id : 8;
-	uint32_t transmitter_id_hi : 8;
-	uint32_t transmitter_id_lo : 8;
-	uint32_t df_mcs : 3;
-	uint32_t reserved : 1;
-	uint32_t transmit_power : 4;
-	uint32_t pad : 24;
-};
-
-enum TestHeaderType
-{
-	// send by tx node to start test
-	ScheduleTest,
-	// rx answers to ScheduleTest so tx knows how many participants
-	StartTest,
-	Testing,
-	// tx sends to signal end of test
-	EndTest,
-	// rx responds with results
-	TestResults,
-};
-
-/* Send operation. */
-static int transmit(uint32_t handle, void *data, size_t data_len, int mcs)
-{
-	int err;
-
-	struct phy_ctrl_field_common header = {
-		.header_format = 0x0,
-		.packet_length_type = 0x0,
-		.packet_length = SUBSLOTS_USED,
-		.short_network_id = (CONFIG_NETWORK_ID & 0xff),
-		.transmitter_id_hi = (device_id >> 8),
-		.transmitter_id_lo = (device_id & 0xff),
-		.transmit_power = CONFIG_TX_POWER,
-		.reserved = 0,
-		.df_mcs = mcs,
-	};
-
-	struct nrf_modem_dect_phy_tx_params tx_op_params = {
-		.start_time = 0,
-		.handle = handle,
-		.network_id = CONFIG_NETWORK_ID,
-		.phy_type = 0,
-		.lbt_rssi_threshold_max = 0,
-		.carrier = CONFIG_CARRIER,
-		.lbt_period = NRF_MODEM_DECT_LBT_PERIOD_MAX,
-		.phy_header = (union nrf_modem_dect_phy_hdr *)&header,
-		.data = data,
-		.data_size = data_len,
-	};
-	err = nrf_modem_dect_phy_tx(&tx_op_params);
-	if (err != 0)
-	{
-		return err;
-	}
-
-	return 0;
-}
-
-/* Receive operation. */
-static int receive(uint32_t handle, uint32_t duration_ms)
-{
-	int err;
-
-	struct nrf_modem_dect_phy_rx_params rx_op_params = {
-		.start_time = 0,
-		.handle = handle,
-		.network_id = CONFIG_NETWORK_ID,
-		.mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
-		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
-		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
-		.rssi_level = -60,
-		.carrier = CONFIG_CARRIER,
-		.duration = duration_ms *
-					NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ,
-		.filter.short_network_id = CONFIG_NETWORK_ID & 0xff,
-		.filter.is_short_network_id_used = 1,
-		/* listen for everything (broadcast mode used) */
-		.filter.receiver_identity = 0,
-	};
-	err = nrf_modem_dect_phy_rx(&rx_op_params);
-	if (err != 0)
-	{
-		return err;
-	}
-
-	return 0;
-}
-
-/* Timers*/
-extern void set_rx_or_tx(struct k_timer *timer_id)
-{
-	is_rx = !has_sent;
-}
-
-K_TIMER_DEFINE(rxtx_timer, set_rx_or_tx, NULL);
-
-/* Button and led initialization */
-#define SW0_NODE DT_ALIAS(sw0)
-#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
-#error "Unsupported board: sw0 devicetree alias is not defined"
-#endif
-static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
-															  {0});
-static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
-													 {0});
 
 /* Callback after init operation. */
 static void init(const uint64_t *time, int16_t temp, enum nrf_modem_dect_phy_err err,
@@ -221,6 +39,10 @@ static void init(const uint64_t *time, int16_t temp, enum nrf_modem_dect_phy_err
 
 	k_sem_give(&operation_sem);
 }
+
+/*
+	PHY modem functions
+*/
 
 /* Callback after deinit operation. */
 static void deinit(const uint64_t *time, enum nrf_modem_dect_phy_err err)
@@ -266,99 +88,103 @@ static void pcc_crc_err(const uint64_t *time,
 }
 
 /* Physical Data Channel reception notification. */
-static void pdc(const uint64_t *time,
-				const struct nrf_modem_dect_phy_rx_pdc_status *status,
-				const void *data, uint32_t len)
-{
-	gpio_pin_set_dt(&led, 0);
-	enum TestHeaderType header_type = (enum TestHeaderType)((int *)data)[0];
-	// LOG_INF("L: %d", len);
-	if (len == 600 || num_of_tx_recieved == 600)
-	{
+// static void pdc(const uint64_t *time,
+// 				const struct nrf_modem_dect_phy_rx_pdc_status *status,
+// 				const void *data_void, uint32_t len)
+// {
+// 	set_led(0);
+// 	char* data = (char *)data_void;
+// 	enum TestHeaderType header_type = (enum TestHeaderType)(data[0]);
+// 	// LOG_INF("L: %d", len);
+// 	// LOG_INF("Header type %d", header_type);
+// 	if (is_rx)
+// 	{
+// 		switch (current_test_status)
+// 		{
+// 		case NotRunning:
+// 			if (header_type != ScheduleTest)
+// 				return;
+// 			current_test_status = Running;
+// 			respond_to_test_start_as_rx = true;
 
-		for (int j = 0; j < len - 8; j += 8)
-		{
-			int i = len - j;
-			printk("%d: %#10.8x%#10.8x%#10.8x%#10.8x%#10.8x%#10.8x%#10.8x%#10.8x\n", i, ((int *)data)[i], ((int *)data)[i + 1], ((int *)data)[i + 2], ((int *)data)[i + 3], ((int *)data)[i + 4], ((int *)data)[i + 5], ((int *)data)[i + 6], ((int *)data)[i + 7]);
-		}
-	}
-	// LOG_INF("Header type %d", header_type);
-	if (is_rx)
-	{
-		switch (current_test_status)
-		{
-		case NotRunning:
-			if (header_type != ScheduleTest)
-				return;
-			current_test_status = Running;
-			respond_to_test_start_as_rx = true;
+// 			break;
+// 		case Scheduled:
+// 		case Running:
+// 			if (header_type == Testing)
+// 			{
+// 				num_of_tx_recieved++;
+//     			// LOG_HEXDUMP_INF(data, 480U, "Sample Data!"); 
+// 				// data[len-1] = 0;
+// 				// if (MAX_DATA_LEN < len) {
+// 				// 	data[MAX_DATA_LEN - 1] = 0;
+// 				// }
+// 				if (num_of_tx_recieved % 100 == 0)
+// 					printk("Data recieved (len %d)\n", len);
+// 				if (num_of_tx_recieved == 154)
+//     				LOG_HEXDUMP_INF(data, len, "Sample Data!"); 
+// 				// for(int i = 10; i < len && i < MAX_DATA_LEN; i++) {
+// 				// 	if (data[i] != tx_buf[i]) {
+// 				// 		LOG_ERR("Wrong data at position %d: %d %d", i, data[i], tx_buf[i]);
+// 				// 	}
+// 				// }
+// 			}
+// 			else if (header_type == EndTest)
+// 			{
+// 				current_test_status = NotRunning;
+// 				send_statistics_back = true;
+// 			}
+// 		}
+// 	}
+// 	else
+// 	{
+// 		switch (current_test_status)
+// 		{
+// 		case NotRunning:
+// 		case Scheduled:
+// 			if (header_type == StartTest)
+// 			{
+// 				LOG_INF("Device ready to take test");
+// 				devices_in_test++;
+// 			}
+// 		case Ended:
+// 			if (header_type == TestResults)
+// 			{
+// 				LOG_HEXDUMP_INF(data, 50U, "Results hexdump:");
+// 				int msg_recieved_inner;
+// 				LOG_INF("WAAAAAAY");
 
-			break;
-		case Scheduled:
-		case Running:
-			if (header_type == Testing)
-			{
-				num_of_tx_recieved++;
-				if (num_of_tx_recieved >= len)
-				{
-				}
-				else if (((int *)data)[num_of_tx_recieved] != 0xAB)
-				{
-				}
-				// LOG_INF("NOOOOO %d", num_of_tx_recieved);
-				else if (((int *)data)[num_of_tx_recieved] == 0xAB)
-					LOG_INF("Yesss %d", num_of_tx_recieved);
-			}
-			else if (header_type == EndTest)
-			{
-				current_test_status = NotRunning;
-				send_statistics_back = true;
-			}
-		}
-	}
-	else
-	{
-		switch (current_test_status)
-		{
-		case Scheduled:
-			if (header_type == StartTest)
-			{
-				LOG_INF("Device ready to take test");
-				devices_in_test++;
-			}
-		case Ended:
-			if (header_type == TestResults)
-			{
-				LOG_INF("WAAAAAAY");
-				LOG_INF("Messages recieved: %d", ((int *)data)[1]);
-			}
-		}
-	}
-	return;
-	// // if msg is statistics (starts with M)
-	// if (((char *)data)[0] == 'M')
-	// {
-	// 	if (is_rx)
-	// 		return;
-	// 	LOG_INF("%s", (char *)data);
-	// 	// turn of the led if you are sending, if you are reading the led should still be on
-	// 	gpio_pin_set_dt(&led, is_rx);
-	// 	// can_send_tx = true;
-	// 	return;
-	// }
-	// if (is_rx)
-	// {
-	// 	num_of_tx_recieved++;
-	// 	// k_timer_start(&last_msg_timer, K_MSEC(500), K_NO_WAIT);
-	// }
-	// // LOG_INF("Received data (RSSI: %d.%d): %d %s",
-	// // 		(status->rssi_2 / 2), (status->rssi_2 & 0b1) * 5, num_of_tx_recieved, (char *)data);
-	// // uint8_t *state = (uint8_t *)data;
-	// // if (len > 0 && (*state == '0' || *state == '1'))
-	// // {
-	// // 	gpio_pin_set_dt(&led, *state - '0');
-	// // }
-}
+// 				memcpy(&msg_recieved_inner, data+1, sizeof(msg_recieved_inner));
+// 				LOG_INF("WAAAAAAY");
+// 				// LOG_HEXDUMP_INF(msg_recieved_inner, sizeof(msg_recieved_inner), "msg_recieved_inner content:");
+// 				LOG_INF("Messages recieved: %d", msg_recieved_inner);
+// 			}
+// 		}
+// 	}
+// 	return;
+// 	// // if msg is statistics (starts with M)
+// 	// if (((char *)data)[0] == 'M')
+// 	// {
+// 	// 	if (is_rx)
+// 	// 		return;
+// 	// 	LOG_INF("%s", (char *)data);
+// 	// 	// turn of the led if you are sending, if you are reading the led should still be on
+// 	// 	gpio_pin_set_dt(&led, is_rx);
+// 	// 	// can_send_tx = true;
+// 	// 	return;
+// 	// }
+// 	// if (is_rx)
+// 	// {
+// 	// 	num_of_tx_recieved++;
+// 	// 	// k_timer_start(&last_msg_timer, K_MSEC(500), K_NO_WAIT);
+// 	// }
+// 	// // LOG_INF("Received data (RSSI: %d.%d): %d %s",
+// 	// // 		(status->rssi_2 / 2), (status->rssi_2 & 0b1) * 5, num_of_tx_recieved, (char *)data);
+// 	// // uint8_t *state = (uint8_t *)data;
+// 	// // if (len > 0 && (*state == '0' || *state == '1'))
+// 	// // {
+// 	// // 	gpio_pin_set_dt(&led, *state - '0');
+// 	// // }
+// }
 
 /* Physical Data Channel CRC error notification. */
 static void pdc_crc_err(
@@ -400,7 +226,7 @@ static struct nrf_modem_dect_phy_callbacks dect_phy_callbacks = {
 	.rx_stop = rx_stop,
 	.pcc = pcc,
 	.pcc_crc_err = pcc_crc_err,
-	.pdc = pdc,
+	.pdc = handle_rx_pdc,
 	.pdc_crc_err = pdc_crc_err,
 	.rssi = rssi,
 	.link_config = link_config,
@@ -414,238 +240,93 @@ static struct nrf_modem_dect_phy_init_params dect_phy_init_params = {
 	.harq_rx_process_count = 4,
 };
 
-void start_test_tx(uint8_t mcs, int duration_ms)
+/* Timers*/
+// wait a fraction of a second at start to see if the button is pressed
+// at the end of this the device is set into rx or tx mode
+extern void set_rx_or_tx(struct k_timer *timer_id)
 {
-	int err;
-	if (mcs > MAX_MCS)
-	{
-		LOG_ERR("MCS value set too high, dont have data for it");
-		return;
+	// if the device is in TX mode, 
+	if (globals.has_sent) {
+		dect_phy_callbacks.pdc = handle_tx_pdc;
 	}
-	// int max_data_len = mcs_subslots_size[mcs][MAX_NUM_OF_SUBSLOTS];
-	int max_data_len = mcs_subslots_size[mcs][MAX_NUM_OF_SUBSLOTS] / 8;
-
-	tx_buf[0] = ScheduleTest;
-	tx_buf[1] = mcs;
-
-	/* Signal to start test */
-	devices_in_test = 0;
-	current_test_status = Scheduled;
-	for (int i = 0; i < 10; i++)
-	{
-		err = transmit(TX_HANDLE, (void *)tx_buf, 100, 0);
-		// err = transmit(TX_HANDLE, (void *)tx_buf, mcs_subslots_size[0][1], 0);
-		if (err != 0)
-		{
-			LOG_ERR("Error during transmition %d", err);
-			return;
-		}
-		/* Wait for TX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
-		// LOG_INF("Send invitation");
-		err = receive(RX_HANDLE, 250);
-		if (err != 0)
-		{
-			LOG_ERR("Error during recieving %d", err);
-			return;
-		}
-		/* Wait for TX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
-	}
-	if (devices_in_test == 0)
-	{
-		LOG_ERR("No devices to take tests with");
-		return;
-	}
-
-	current_test_status = Running;
-	tx_buf[0] = Testing;
-	int msg_send = 0;
-	LOG_INF("here");
-	int64_t current_time = k_uptime_get();
-	while (current_test_status == Running && k_uptime_get() - current_time <= duration_ms)
-	{
-		err = transmit(TX_HANDLE, (void *)tx_buf, max_data_len, mcs);
-		// err = transmit(TX_HANDLE, (void *)tx_buf, msg_send, mcs);
-		if (err != 0)
-		{
-			LOG_ERR("Error during transmition %d", err);
-			continue;
-		}
-		if (msg_send % 100 == 0)
-			LOG_INF("Sent test %d", msg_send);
-		/* Wait for TX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
-		msg_send++;
-	}
-	LOG_INF("msg sent: %d", msg_send);
-	LOG_INF("msg size: %dB = %db", max_data_len, max_data_len * 8);
-	LOG_INF("Data rate: %d kb/s", ((max_data_len / 1024) * msg_send * 1000) / duration_ms);
-	responses_received = 0;
-	tx_buf[0] = EndTest;
-	current_test_status = Ended;
-	for (int i = 0; i < 10; i++)
-	{
-		if (responses_received >= devices_in_test)
-			break;
-		err = transmit(TX_HANDLE, (void *)tx_buf, 10, 0);
-		if (err != 0)
-		{
-			LOG_ERR("Error during transmition %d", err);
-			continue;
-		}
-		/* Wait for TX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
-		err = receive(RX_HANDLE, 100);
-		if (err != 0)
-		{
-			LOG_ERR("Error during transmition %d", err);
-			continue;
-		}
-		/* Wait for RX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
-	}
+	globals.is_rx = !globals.has_sent;
 }
+
+K_TIMER_DEFINE(rxtx_timer, set_rx_or_tx, NULL);
+
+
 
 int main(void)
 {
 	int err;
-	/* Button and led setup*/
-	if (!gpio_is_ready_dt(&button))
-	{
-		printk("Error: button device is not ready\n");
-		return 0;
-	}
 
-	err = gpio_pin_configure_dt(&button, GPIO_INPUT);
-	if (err != 0)
-	{
-		printk("Error %d: failed to configure %s pin %d\n",
-			   err, button.port->name, button.pin);
-		return 0;
-	}
-	if (led.port && !gpio_is_ready_dt(&led))
-	{
-		printk("Error %d: LED device %s is not ready; ignoring it\n",
-			   err, led.port->name);
-		led.port = NULL;
-	}
-	if (led.port)
-	{
-		err = gpio_pin_configure_dt(&led, GPIO_OUTPUT);
-		if (err != 0)
-		{
-			printk("Error %d: failed to configure LED device %s pin %d\n",
-				   err, led.port->name, led.pin);
-			led.port = NULL;
-		}
-		else
-		{
-			printk("Set up LED at %s pin %d\n", led.port->name, led.pin);
-		}
-	}
-
-	/* DECT NR+ modem initialization */
+	if (init_led_and_button() >= 0) return 0;
+	if (modem_init(&dect_phy_callbacks, &dect_phy_init_params, globals.device_id, &operation_sem) >= 0) return 0;
 
 	LOG_INF("Dect NR+ PHY Hello sample started");
 
-	err = nrf_modem_lib_init();
-	if (err)
-	{
-		LOG_ERR("modem init failed, err %d", err);
-		return err;
-	}
 
-	err = nrf_modem_dect_phy_callback_set(&dect_phy_callbacks);
-	if (err)
-	{
-		LOG_ERR("nrf_modem_dect_phy_callback_set failed, err %d", err);
-		return err;
-	}
-
-	err = nrf_modem_dect_phy_init(&dect_phy_init_params);
-	if (err)
-	{
-		LOG_ERR("nrf_modem_dect_phy_init failed, err %d", err);
-		return err;
-	}
-
-	k_sem_take(&operation_sem, K_FOREVER);
-	if (exit)
-	{
-		return -EIO;
-	}
-
-	hwinfo_get_device_id((void *)&device_id, sizeof(device_id));
-
-	LOG_INF("Dect NR+ PHY initialized, device ID: %d", device_id);
-
-	err = nrf_modem_dect_phy_capability_get();
-	if (err)
-	{
-		LOG_ERR("nrf_modem_dect_phy_capability_get failed, err %d", err);
-	}
-
-	for (int i = 0; i < 4832; i++)
-	{
-		tx_buf[i] = 0xABABABAB;
-	}
-
-	/* End of setup*/
-
+	// if the button is pressed in 1 second, the device will go into tx mode
 	k_timer_start(&rxtx_timer, K_MSEC(1000), K_NO_WAIT);
-	while (!is_rx)
+	// memset(tx_buf, ':', MAX_DATA_LEN*sizeof(tx_buf[0]));
+	// tx_buf[MAX_DATA_LEN-1] = '0';
+	while (!globals.is_rx)
 	{
 		int button_state;
 		int prev_button_state = 0;
-		button_state = gpio_pin_get_dt(&button);
-		if (prev_button_state != button_state && current_test_status == NotRunning)
+		button_state = read_button();
+		if (prev_button_state != button_state && globals.cur_test_status == NotRunning)
 		{
 			prev_button_state = button_state;
 			if (button_state != 1)
 			{
 				continue;
 			}
-			has_sent = true;
+
+			dect_phy_callbacks.pdc = handle_tx_pdc;
+			err = nrf_modem_dect_phy_callback_set(&dect_phy_callbacks);
+			if (err)
+			{
+				LOG_ERR("nrf_modem_dect_phy_init failed, err %d", err);
+				return err;
+			}
+			// err = nrf_modem_dect_phy_init(dect_phy_init_params);
+
+			globals.has_sent = true;
 
 			LOG_INF("Starting TX test");
 			// gpio_pin_set_dt(&led, 1);
-			start_test_tx(4, 60 * MSEC_PER_SEC);
+			// start_test_tx(4, 10 * MSEC_PER_SEC);
+			TestSettings set = {
+				.mcs = 4,
+				.seconds = 15,
+				.msg_to_send = 10000,
+			};
+			err = start_test_tx(&set, tx_buf);
+			if (err < 0) {
+				LOG_ERR("start_test_tx err %d", err);
+			}
 			// gpio_pin_set_dt(&led, 0);
 		}
 	}
+
+
 	LOG_INF("Recieving msg!");
-	gpio_pin_set_dt(&led, 1);
+	set_led(1);
 	while (1)
 	{
-		if (respond_to_test_start_as_rx)
+		if (globals.rx.respond_to_test_start_as_rx)
 		{
-			respond_to_test_start_as_rx = false;
-			const int tx_len = mcs_subslots_size[0][1];
-			tx_buf[0] = StartTest;
-			transmit(TX_HANDLE, &tx_buf, 100, 0);
-			/* Wait for TX operation to complete. */
-			k_sem_take(&operation_sem, K_FOREVER);
-			// }
-			LOG_INF("Send responses");
+			globals.rx.respond_to_test_start_as_rx = false;
+			start_rx_test(tx_buf);
 		}
-		else if (send_statistics_back)
+		else if (globals.rx.send_statistics_back)
 		{
-			LOG_INF("Sending statistics");
-			send_statistics_back = false;
-			tx_buf[0] = TestResults;
-			tx_buf[1] = num_of_tx_recieved;
-			tx_buf[2] = device_id >> 8;
-			tx_buf[3] = device_id & 0xff;
-			LOG_INF("msg rec: %d", num_of_tx_recieved);
+			globals.rx.send_statistics_back = false;
+			end_rx_test(tx_buf);
+		}
 
-			transmit(TX_HANDLE, (void *)tx_buf, 100, 0);
-			/* Wait for TX operation to complete. */
-			k_sem_take(&operation_sem, K_FOREVER);
-			LOG_INF("Sending statistics");
-			num_of_tx_recieved = 0;
-		}
-		err = receive(RX_HANDLE, 100);
+		err = receive(RX_HANDLE, 1000);
 		if (err != 0)
 		{
 			LOG_ERR("Error during receiving %d", err);
@@ -656,22 +337,7 @@ int main(void)
 	}
 
 	LOG_INF("Shutting down");
-
-	err = nrf_modem_dect_phy_deinit();
-	if (err)
-	{
-		LOG_ERR("nrf_modem_dect_phy_deinit() failed, err %d", err);
-		return err;
-	}
-
-	k_sem_take(&operation_sem, K_FOREVER);
-
-	err = nrf_modem_lib_shutdown();
-	if (err)
-	{
-		LOG_ERR("nrf_modem_lib_shutdown() failed, err %d", err);
-		return err;
-	}
+	modem_deinit(&operation_sem);
 
 	LOG_INF("Bye!");
 
