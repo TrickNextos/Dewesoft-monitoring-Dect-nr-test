@@ -3,44 +3,35 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
-#include <string.h>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
-#include <nrf_modem_dect_phy.h>
-#include <modem/nrf_modem_lib.h>
-#include <zephyr/drivers/hwinfo.h>
 
-LOG_MODULE_REGISTER(app);
+#include "main.h"
+#include "init.h"
+#include "common.h"
 
+#include "transmit.h"
+#include "recieve.h"
+
+LOG_MODULE_REGISTER(main);
+
+// static Globals globals = {};
+
+// if this is the error, include overlay-eu.proj/overlay-us.proj into build
 BUILD_ASSERT(CONFIG_CARRIER, "Carrier must be configured according to local regulations");
 
-#define DATA_LEN_MAX 32
-
 static bool exit;
-static uint16_t device_id;
+// static uint16_t device_id;
 
-/* Header type 1, due to endianness the order is different than in the specification. */
-struct phy_ctrl_field_common {
-	uint32_t packet_length : 4;
-	uint32_t packet_length_type : 1;
-	uint32_t header_format : 3;
-	uint32_t short_network_id : 8;
-	uint32_t transmitter_id_hi : 8;
-	uint32_t transmitter_id_lo : 8;
-	uint32_t df_mcs : 3;
-	uint32_t reserved : 1;
-	uint32_t transmit_power : 4;
-	uint32_t pad : 24;
-};
+// char tx_buf[MAX_DATA_LEN] = "Eos harum dolorum in iure aspernatur aut consectetur dolores. In quae itaque et dolorem natus quo voluptate molestias non commodi officia est laborum molestiae est vitae aliquam. Non autem ipsa ex consequuntur quae et natus tempore! Sed debitis pariatur non optio inventore sit aspernatur mollitia ut ipsa sunt a impedit nihil eum asperiores possimus est ullam quis. 33 architecto expedita eos autem quisquam ea sapiente saepe et delectus facilis et odio excepturi ad numquam iure. Aut sunt quia in nihil architecto cum explicabo sint et galisum perspiciatis. Non possimus mollitia non Quis labore eos dignissimos galisum. Qui excepturi accusamus eum tempora quibusdam et deserunt omnis qui consequuntur pariatur sit dignissimos vero est nisi distinctio est quaerat doloremque.Aut galisum vero id rerum molestiae sed dolores nihil. Ex dolor quia ut provident modi qui voluptatem iusto vel quia explicabo ut expedita quam sed quia reprehenderit aut repellat perspiciatis. Et delectus aliquid quo aspernatur quidem sit reiciendis sint. Ut molestiae consequatur ea eaque consequatur et fugiat consequatur vel suscipit dolores ad nesciunt dolorem. Non quibusdam maiores et blanditiis laborum sed vitae nemo et distinctio sunt aut dolor repudiandae. Non praesentium rerum aut voluptas error vel eius pariatur aut reprehenderit voluptatum? Et vero nemo ad amet enim et vitae veniam in optio consequatur non autem itaque eos animi expedita. Sit quis suscipit cum ipsum enim rem omnis nobis eum debitis autem. Aut similique voluptatem non recusandae quod ad reprehenderit blanditiis eos voluptate nostrum. Et distinctio doloremque non molestiae doloribus ut placeat accusamus et magnam doloremque At aliquid quia. Est quam sint non assumenda dolorem hic rerum facilis a reprehenderit voluptatibus in assumenda commodi ut provident corporis et numquam recusandae. Et dolorem architecto et deleniti autem vel Quis earum. Ut nisi maxime id beatae nostrum id magnam accusantium ad nesciunt libero! 33 incidunt rerum eum voluptatem esse qui iure odit et cupiditate sunt.Sit rerum necessitatibus rem eveniet repellat ut error sunt rem sunt tempora eum cupiditate amet non consectetur tempore. Ut amet accusantium rem sequi molestias sed inventore ipsa in ipsa voluptatem. In aliquam corrupti et ducimus dolores rem voluptatem repellat aut odit temporibus et soluta maxime. Et recusandae quia in porro laborum aut culpa tenetur. Ut tempora expedita a quia eveniet et galisum culpa et nisi fugit. Non aliquid saepe eos sequi eaque rem maiores saepe hic porro omnis ea voluptas dolores sit deserunt similique non illum rerum. Non nostrum veniam et impedit nisi vel dolor eveniet ab blanditiis nesciunt non eveniet numquam. In quos omnis non obcaecati voluptatum ea unde earum qui dolor adipisci et odio dolor! Ut galisum totam ut sint porro ab illum dolore et dolorem nostrum. Et numquam culpa aut enim labore ut quis rerum qui autem fugit a harum sapiente. Cum repellat nisi hic impedit autem aut quis similique. Et molestiae doloremque non voluptatem tenetur est quisquam totam eum fuga temporibus cum laborum obcaecati sed eveniet doloribus a voluptatibus labore. In deserunt aperiam et ducimus quisquam quo autem error. Et praesentium ipsum sit adipisci quia et sunt reprehenderit.Eos harum dolorum in iure aspernatur aut consectetur dolores. In quae itaque et dolorem natus quo voluptate molestias non commodi officia est laborum molestiae est vitae aliquam. Non autem ipsa ex consequuntur quae et natus tempore! Sed debitis pariatur non optio inventore sit aspernatur mollitia ut ipsa sunt a impedit nihil eum asperiores possimus est ullam quis. 33 architecto expedita eos autem quisquam ea sapiente saepe et delectus facilis et odio excepturi ad numquam iure. Aut sunt quia in nihil architecto cum explicabo sint et galisum perspiciatis. Non possimus mollitia non Quis labore eos dignissimos galisum. Qui excepturi accusamus eum tempora quibusdam et deserunt omnis qui consequuntur pariatur sit dignissimos vero est nisi distinctio est quaerat doloremque.Aut galisum vero id rerum molestiae sed dolores nihil. Ex dolor quia ut provident modi qui voluptatem iusto vel quia explicabo ut expedita quam sed quia reprehenderit aut repellat perspiciatis. Et delectus aliquid quo aspernatur quidem sit reiciendis sint. Ut molestiae consequatur ea eaque consequatur et fugiat consequatur vel suscipit dolores ad nesciunt dolorem. Non quibusdam maiores et blanditiis laborum sed vitae nemo et distinctio sunt aut dolor repudiandae. Non praesentium rerum aut voluptas error vel eius pariatur aut reprehenderit voluptatum? Et vero nemo ad amet enim et vitae veniam in optio consequatur non autem itaque eos animi expedita. Sit quis suscipit cum ipsum enim rem omnis nobis eum debitis autem. Aut similique voluptatem non recusandae quod ad reprehenderit.";
+char tx_buf[MAX_DATA_LEN] = {};
 
-/* Semaphore to synchronize modem calls. */
-K_SEM_DEFINE(operation_sem, 0, 1);
+
 
 /* Callback after init operation. */
 static void init(const uint64_t *time, int16_t temp, enum nrf_modem_dect_phy_err err,
-	  const struct nrf_modem_dect_phy_modem_cfg *cfg)
+				 const struct nrf_modem_dect_phy_modem_cfg *cfg)
 {
-	if (err) {
+	if (err)
+	{
 		LOG_ERR("Init failed, err %d", err);
 		exit = true;
 		return;
@@ -49,10 +40,15 @@ static void init(const uint64_t *time, int16_t temp, enum nrf_modem_dect_phy_err
 	k_sem_give(&operation_sem);
 }
 
+/*
+	PHY modem functions
+*/
+
 /* Callback after deinit operation. */
 static void deinit(const uint64_t *time, enum nrf_modem_dect_phy_err err)
 {
-	if (err) {
+	if (err)
+	{
 		LOG_ERR("Deinit failed, err %d", err);
 		return;
 	}
@@ -62,16 +58,16 @@ static void deinit(const uint64_t *time, enum nrf_modem_dect_phy_err err)
 
 /* Operation complete notification. */
 static void op_complete(const uint64_t *time, int16_t temperature,
-		 enum nrf_modem_dect_phy_err err, uint32_t handle)
+						enum nrf_modem_dect_phy_err err, uint32_t handle)
 {
-	LOG_DBG("op_complete cb time %"PRIu64" status %d", *time, err);
+	LOG_DBG("op_complete cb time %" PRIu64 " status %d", *time, err);
 	k_sem_give(&operation_sem);
 }
 
 /* Callback after receive stop operation. */
 static void rx_stop(const uint64_t *time, enum nrf_modem_dect_phy_err err, uint32_t handle)
 {
-	LOG_DBG("rx_stop cb time %"PRIu64" status %d handle %d", *time, err, handle);
+	LOG_DBG("rx_stop cb time %" PRIu64 " status %d handle %d", *time, err, handle);
 	k_sem_give(&operation_sem);
 }
 
@@ -82,58 +78,144 @@ static void pcc(
 	const union nrf_modem_dect_phy_hdr *hdr)
 {
 	struct phy_ctrl_field_common *header = (struct phy_ctrl_field_common *)hdr->type_1;
-
-	LOG_INF("Received header from device ID %d",
-		header->transmitter_id_hi << 8 |  header->transmitter_id_lo);
 }
 
 /* Physical Control Channel CRC error notification. */
 static void pcc_crc_err(const uint64_t *time,
-		 const struct nrf_modem_dect_phy_rx_pcc_crc_failure *crc_failure)
+						const struct nrf_modem_dect_phy_rx_pcc_crc_failure *crc_failure)
 {
-	LOG_DBG("pcc_crc_err cb time %"PRIu64"", *time);
+	LOG_DBG("pcc_crc_err cb time %" PRIu64 "", *time);
 }
 
 /* Physical Data Channel reception notification. */
-static void pdc(const uint64_t *time,
-		const struct nrf_modem_dect_phy_rx_pdc_status *status,
-		const void *data, uint32_t len)
-{
-	/* Received RSSI value is in fixed precision format Q14.1 */
-	LOG_INF("Received data (RSSI: %d.%d): %s",
-		(status->rssi_2 / 2), (status->rssi_2 & 0b1) * 5, (char *)data);
-}
+// static void pdc(const uint64_t *time,
+// 				const struct nrf_modem_dect_phy_rx_pdc_status *status,
+// 				const void *data_void, uint32_t len)
+// {
+// 	set_led(0);
+// 	char* data = (char *)data_void;
+// 	enum TestHeaderType header_type = (enum TestHeaderType)(data[0]);
+// 	// LOG_INF("L: %d", len);
+// 	// LOG_INF("Header type %d", header_type);
+// 	if (is_rx)
+// 	{
+// 		switch (current_test_status)
+// 		{
+// 		case NotRunning:
+// 			if (header_type != ScheduleTest)
+// 				return;
+// 			current_test_status = Running;
+// 			respond_to_test_start_as_rx = true;
+
+// 			break;
+// 		case Scheduled:
+// 		case Running:
+// 			if (header_type == Testing)
+// 			{
+// 				num_of_tx_recieved++;
+//     			// LOG_HEXDUMP_INF(data, 480U, "Sample Data!"); 
+// 				// data[len-1] = 0;
+// 				// if (MAX_DATA_LEN < len) {
+// 				// 	data[MAX_DATA_LEN - 1] = 0;
+// 				// }
+// 				if (num_of_tx_recieved % 100 == 0)
+// 					printk("Data recieved (len %d)\n", len);
+// 				if (num_of_tx_recieved == 154)
+//     				LOG_HEXDUMP_INF(data, len, "Sample Data!"); 
+// 				// for(int i = 10; i < len && i < MAX_DATA_LEN; i++) {
+// 				// 	if (data[i] != tx_buf[i]) {
+// 				// 		LOG_ERR("Wrong data at position %d: %d %d", i, data[i], tx_buf[i]);
+// 				// 	}
+// 				// }
+// 			}
+// 			else if (header_type == EndTest)
+// 			{
+// 				current_test_status = NotRunning;
+// 				send_statistics_back = true;
+// 			}
+// 		}
+// 	}
+// 	else
+// 	{
+// 		switch (current_test_status)
+// 		{
+// 		case NotRunning:
+// 		case Scheduled:
+// 			if (header_type == StartTest)
+// 			{
+// 				LOG_INF("Device ready to take test");
+// 				devices_in_test++;
+// 			}
+// 		case Ended:
+// 			if (header_type == TestResults)
+// 			{
+// 				LOG_HEXDUMP_INF(data, 50U, "Results hexdump:");
+// 				int msg_recieved_inner;
+// 				LOG_INF("WAAAAAAY");
+
+// 				memcpy(&msg_recieved_inner, data+1, sizeof(msg_recieved_inner));
+// 				LOG_INF("WAAAAAAY");
+// 				// LOG_HEXDUMP_INF(msg_recieved_inner, sizeof(msg_recieved_inner), "msg_recieved_inner content:");
+// 				LOG_INF("Messages recieved: %d", msg_recieved_inner);
+// 			}
+// 		}
+// 	}
+// 	return;
+// 	// // if msg is statistics (starts with M)
+// 	// if (((char *)data)[0] == 'M')
+// 	// {
+// 	// 	if (is_rx)
+// 	// 		return;
+// 	// 	LOG_INF("%s", (char *)data);
+// 	// 	// turn of the led if you are sending, if you are reading the led should still be on
+// 	// 	gpio_pin_set_dt(&led, is_rx);
+// 	// 	// can_send_tx = true;
+// 	// 	return;
+// 	// }
+// 	// if (is_rx)
+// 	// {
+// 	// 	num_of_tx_recieved++;
+// 	// 	// k_timer_start(&last_msg_timer, K_MSEC(500), K_NO_WAIT);
+// 	// }
+// 	// // LOG_INF("Received data (RSSI: %d.%d): %d %s",
+// 	// // 		(status->rssi_2 / 2), (status->rssi_2 & 0b1) * 5, num_of_tx_recieved, (char *)data);
+// 	// // uint8_t *state = (uint8_t *)data;
+// 	// // if (len > 0 && (*state == '0' || *state == '1'))
+// 	// // {
+// 	// // 	gpio_pin_set_dt(&led, *state - '0');
+// 	// // }
+// }
 
 /* Physical Data Channel CRC error notification. */
 static void pdc_crc_err(
 	const uint64_t *time, const struct nrf_modem_dect_phy_rx_pdc_crc_failure *crc_failure)
 {
-	LOG_DBG("pdc_crc_err cb time %"PRIu64"", *time);
+	LOG_DBG("pdc_crc_err cb time %" PRIu64 "", *time);
 }
 
 /* RSSI measurement result notification. */
 static void rssi(const uint64_t *time, const struct nrf_modem_dect_phy_rssi_meas *status)
 {
-	LOG_DBG("rssi cb time %"PRIu64" carrier %d", *time, status->carrier);
+	LOG_DBG("rssi cb time %" PRIu64 " carrier %d", *time, status->carrier);
 }
 
 /* Callback after link configuration operation. */
 static void link_config(const uint64_t *time, enum nrf_modem_dect_phy_err err)
 {
-	LOG_DBG("link_config cb time %"PRIu64" status %d", *time, err);
+	LOG_DBG("link_config cb time %" PRIu64 " status %d", *time, err);
 }
 
 /* Callback after time query operation. */
 static void time_get(const uint64_t *time, enum nrf_modem_dect_phy_err err)
 {
-	LOG_DBG("time_get cb time %"PRIu64" status %d", *time, err);
+	LOG_DBG("time_get cb time %" PRIu64 " status %d", *time, err);
 }
 
 /* Callback after capability get operation. */
 static void capability_get(const uint64_t *time, enum nrf_modem_dect_phy_err err,
-		    const struct nrf_modem_dect_phy_capability *capability)
+						   const struct nrf_modem_dect_phy_capability *capability)
 {
-	LOG_DBG("capability_get cb time %"PRIu64" status %d", *time, err);
+	LOG_DBG("capability_get cb time %" PRIu64 " status %d", *time, err);
 }
 
 /* Dect PHY callbacks. */
@@ -144,7 +226,7 @@ static struct nrf_modem_dect_phy_callbacks dect_phy_callbacks = {
 	.rx_stop = rx_stop,
 	.pcc = pcc,
 	.pcc_crc_err = pcc_crc_err,
-	.pdc = pdc,
+	.pdc = handle_rx_pdc,
 	.pdc_crc_err = pdc_crc_err,
 	.rssi = rssi,
 	.link_config = link_config,
@@ -158,165 +240,104 @@ static struct nrf_modem_dect_phy_init_params dect_phy_init_params = {
 	.harq_rx_process_count = 4,
 };
 
-/* Send operation. */
-static int transmit(uint32_t handle, void *data, size_t data_len)
+/* Timers*/
+// wait a fraction of a second at start to see if the button is pressed
+// at the end of this the device is set into rx or tx mode
+extern void set_rx_or_tx(struct k_timer *timer_id)
 {
-	int err;
-
-	struct phy_ctrl_field_common header = {
-		.header_format = 0x0,
-		.packet_length_type = 0x0,
-		.packet_length = 0x01,
-		.short_network_id = (CONFIG_NETWORK_ID & 0xff),
-		.transmitter_id_hi = (device_id >> 8),
-		.transmitter_id_lo = (device_id & 0xff),
-		.transmit_power = CONFIG_TX_POWER,
-		.reserved = 0,
-		.df_mcs = CONFIG_MCS,
-	};
-
-	struct nrf_modem_dect_phy_tx_params tx_op_params = {
-		.start_time = 0,
-		.handle = handle,
-		.network_id = CONFIG_NETWORK_ID,
-		.phy_type = 0,
-		.lbt_rssi_threshold_max = 0,
-		.carrier = CONFIG_CARRIER,
-		.lbt_period = NRF_MODEM_DECT_LBT_PERIOD_MAX,
-		.phy_header = (union nrf_modem_dect_phy_hdr *)&header,
-		.data = data,
-		.data_size = data_len,
-	};
-
-	err = nrf_modem_dect_phy_tx(&tx_op_params);
-	if (err != 0) {
-		return err;
+	// if the device is in TX mode, 
+	if (globals.has_sent) {
+		dect_phy_callbacks.pdc = handle_tx_pdc;
 	}
-
-	return 0;
+	globals.is_rx = !globals.has_sent;
 }
 
-/* Receive operation. */
-static int receive(uint32_t handle)
-{
-	int err;
+K_TIMER_DEFINE(rxtx_timer, set_rx_or_tx, NULL);
 
-	struct nrf_modem_dect_phy_rx_params rx_op_params = {
-		.start_time = 0,
-		.handle = handle,
-		.network_id = CONFIG_NETWORK_ID,
-		.mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
-		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
-		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
-		.rssi_level = -60,
-		.carrier = CONFIG_CARRIER,
-		.duration = CONFIG_RX_PERIOD_S * MSEC_PER_SEC *
-			    NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ,
-		.filter.short_network_id = CONFIG_NETWORK_ID & 0xff,
-		.filter.is_short_network_id_used = 1,
-		/* listen for everything (broadcast mode used) */
-		.filter.receiver_identity = 0,
-	};
 
-	err = nrf_modem_dect_phy_rx(&rx_op_params);
-	if (err != 0) {
-		return err;
-	}
-
-	return 0;
-}
 
 int main(void)
 {
 	int err;
-	uint32_t tx_handle = 0;
-	uint32_t rx_handle = 1;
-	uint32_t tx_counter_value = 0;
-	uint8_t tx_buf[DATA_LEN_MAX];
-	size_t tx_len;
+
+	if (init_led_and_button() >= 0) return 0;
+	if (modem_init(&dect_phy_callbacks, &dect_phy_init_params, globals.device_id, &operation_sem) >= 0) return 0;
 
 	LOG_INF("Dect NR+ PHY Hello sample started");
 
-	err = nrf_modem_lib_init();
-	if (err) {
-		LOG_ERR("modem init failed, err %d", err);
-		return err;
+
+	// if the button is pressed in 1 second, the device will go into tx mode
+	k_timer_start(&rxtx_timer, K_MSEC(1000), K_NO_WAIT);
+	// memset(tx_buf, ':', MAX_DATA_LEN*sizeof(tx_buf[0]));
+	// tx_buf[MAX_DATA_LEN-1] = '0';
+	while (!globals.is_rx)
+	{
+		int button_state;
+		int prev_button_state = 0;
+		button_state = read_button();
+		if (prev_button_state != button_state && globals.cur_test_status == NotRunning)
+		{
+			prev_button_state = button_state;
+			if (button_state != 1)
+			{
+				continue;
+			}
+
+			dect_phy_callbacks.pdc = handle_tx_pdc;
+			err = nrf_modem_dect_phy_callback_set(&dect_phy_callbacks);
+			if (err)
+			{
+				LOG_ERR("nrf_modem_dect_phy_init failed, err %d", err);
+				return err;
+			}
+			// err = nrf_modem_dect_phy_init(dect_phy_init_params);
+
+			globals.has_sent = true;
+
+			LOG_INF("Starting TX test");
+			// gpio_pin_set_dt(&led, 1);
+			// start_test_tx(4, 10 * MSEC_PER_SEC);
+			TestSettings set = {
+				.mcs = 4,
+				.seconds = 15,
+				.msg_to_send = 10000,
+			};
+			err = start_test_tx(&set, tx_buf);
+			if (err < 0) {
+				LOG_ERR("start_test_tx err %d", err);
+			}
+			// gpio_pin_set_dt(&led, 0);
+		}
 	}
 
-	err = nrf_modem_dect_phy_callback_set(&dect_phy_callbacks);
-	if (err) {
-		LOG_ERR("nrf_modem_dect_phy_callback_set failed, err %d", err);
-		return err;
-	}
 
-	err = nrf_modem_dect_phy_init(&dect_phy_init_params);
-	if (err) {
-		LOG_ERR("nrf_modem_dect_phy_init failed, err %d", err);
-		return err;
-	}
-
-	k_sem_take(&operation_sem, K_FOREVER);
-	if (exit) {
-		return -EIO;
-	}
-
-	hwinfo_get_device_id((void *)&device_id, sizeof(device_id));
-
-	LOG_INF("Dect NR+ PHY initialized, device ID: %d", device_id);
-
-	err = nrf_modem_dect_phy_capability_get();
-	if (err) {
-		LOG_ERR("nrf_modem_dect_phy_capability_get failed, err %d", err);
-	}
-
-	while (1) {
-		/** Transmitting message */
-		LOG_INF("Transmitting %d", tx_counter_value);
-		tx_len = sprintf(tx_buf, "Hello DECT! %d", tx_counter_value);
-
-		err = transmit(tx_handle, tx_buf, tx_len);
-		if (err) {
-			LOG_ERR("Transmisstion failed, err %d", err);
-			return err;
+	LOG_INF("Recieving msg!");
+	set_led(1);
+	while (1)
+	{
+		if (globals.rx.respond_to_test_start_as_rx)
+		{
+			globals.rx.respond_to_test_start_as_rx = false;
+			start_rx_test(tx_buf);
+		}
+		else if (globals.rx.send_statistics_back)
+		{
+			globals.rx.send_statistics_back = false;
+			end_rx_test(tx_buf);
 		}
 
-		tx_counter_value++;
-
-		if ((tx_counter_value >= CONFIG_TX_TRANSMISSIONS) && CONFIG_TX_TRANSMISSIONS) {
-			LOG_INF("Reached maximum number of transmissions (%d)",
-				CONFIG_TX_TRANSMISSIONS);
-			break;
+		err = receive(RX_HANDLE, 1000);
+		if (err != 0)
+		{
+			LOG_ERR("Error during receiving %d", err);
+			continue;
 		}
-
-		/* Wait for TX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
-
-		/** Receiving messages for CONFIG_RX_PERIOD_S seconds. */
-		err = receive(rx_handle);
-		if (err) {
-			LOG_ERR("Reception failed, err %d", err);
-			return err;
-		}
-
 		/* Wait for RX operation to complete. */
 		k_sem_take(&operation_sem, K_FOREVER);
 	}
 
 	LOG_INF("Shutting down");
-
-	err = nrf_modem_dect_phy_deinit();
-	if (err) {
-		LOG_ERR("nrf_modem_dect_phy_deinit() failed, err %d", err);
-		return err;
-	}
-
-	k_sem_take(&operation_sem, K_FOREVER);
-
-	err = nrf_modem_lib_shutdown();
-	if (err) {
-		LOG_ERR("nrf_modem_lib_shutdown() failed, err %d", err);
-		return err;
-	}
+	modem_deinit(&operation_sem);
 
 	LOG_INF("Bye!");
 
