@@ -151,7 +151,7 @@ void handle_tx_pdc(const uint64_t *time, const struct nrf_modem_dect_phy_rx_pdc_
 	LOG_HEXDUMP_DBG(data_void, sizeof(h) * 10, "Header: ");
 	memcpy(&h, data_void + 4, sizeof(h)); // idk why +4, but it works // update, works only for StartTest, not for TestResults ;(((((
 	LOG_DBG("type %d", h.type);
-	LOG_ILOG_DBGNF("mc %d", h.mcs);
+	LOG_INF("mc %d", h.mcs);
 	LOG_DBG("msg_num %d", h.msg_num);
 
 	switch (globals.cur_test_status)

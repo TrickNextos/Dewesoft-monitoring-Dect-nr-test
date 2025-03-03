@@ -11,6 +11,8 @@
 #include "transmit.h"
 #include "recieve.h"
 
+#include "serial_communication.h"
+
 LOG_MODULE_REGISTER(main);
 
 // static Globals globals = {};
@@ -260,11 +262,15 @@ int main(void)
 {
 	int err;
 
-	if (init_led_and_button() >= 0) return 0;
-	if (modem_init(&dect_phy_callbacks, &dect_phy_init_params, globals.device_id, &operation_sem) >= 0) return 0;
-
 	LOG_INF("Dect NR+ PHY Hello sample started");
 
+	if (init_led_and_button() >= 0) return 0;
+	if (modem_init(&dect_phy_callbacks, &dect_phy_init_params, globals.device_id, &operation_sem) >= 0) return 0;
+	// if (uart_setup() >= 0) return 0;
+	uart_setup();
+	LOG_INF("uart_buf_len: %d", UART_BUF_LEN);
+
+	LOG_INF("Initialization complete");
 
 	// if the button is pressed in 1 second, the device will go into tx mode
 	k_timer_start(&rxtx_timer, K_MSEC(1000), K_NO_WAIT);
@@ -300,7 +306,7 @@ int main(void)
 			TestSettings set = {
 				.mcs = 4,
 				.seconds = 15,
-				.msg_to_send = 10000,
+				.msg_to_send = 2000,
 			};
 			err = start_test_tx(&set, tx_buf);
 			if (err < 0) {
