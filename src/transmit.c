@@ -3,7 +3,7 @@
 #include "common.h"
 #include "common.h"
 
-LOG_MODULE_REGISTER(transmit, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(transmit, LOG_LEVEL_INF);
 
 // extern k_sem operation_sem;
 
@@ -26,7 +26,6 @@ int start_test_tx(TestSettings* settings, char tx_buf[])
 
 	/* Signal to start test */
 	err = setup_tx_test(settings, tx_buf);
-	LOG_ERR("myb");
 	if (err < 0) return err;
 
 	globals.cur_test_status = Running;
@@ -119,8 +118,8 @@ void finish_tx_test(TestSettings* settings, char tx_buf[]) {
 	int err;
 	globals.tx.end_responses_recieved = 0;
 	tx_buf[0] = EndTest;
-	globals.cur_test_status = NotRunning;
-
+	globals.cur_test_status = Ended;
+	LOG_INF("listening for resp");
 	for (int i = 0; i < 10; i++)
 	{
 		if (globals.tx.end_responses_recieved >= globals.tx.devices_in_test)
@@ -133,7 +132,7 @@ void finish_tx_test(TestSettings* settings, char tx_buf[]) {
 		}
 		/* Wait for TX operation to complete. */
 		k_sem_take(&operation_sem, K_FOREVER);
-		err = receive(RX_HANDLE, 100);
+		err = receive(RX_HANDLE, 250);
 		if (err != 0)
 		{
 			LOG_ERR("Error during transmition %d", err);
@@ -142,6 +141,10 @@ void finish_tx_test(TestSettings* settings, char tx_buf[]) {
 		/* Wait for RX operation to complete. */
 		k_sem_take(&operation_sem, K_FOREVER);
 	}
+	LOG_INF("end responses");
+	k_msleep(100);
+	globals.cur_test_status = NotRunning;
+
 }
 
 void handle_tx_pdc(const uint64_t *time, const struct nrf_modem_dect_phy_rx_pdc_status *status, const void *data_void, uint32_t len) {
@@ -149,31 +152,29 @@ void handle_tx_pdc(const uint64_t *time, const struct nrf_modem_dect_phy_rx_pdc_
 
 	TestHeader h = {};
 	LOG_HEXDUMP_DBG(data_void, sizeof(h) * 10, "Header: ");
-	memcpy(&h, data_void + 4, sizeof(h)); // idk why +4, but it works // update, works only for StartTest, not for TestResults ;(((((
-	LOG_DBG("type %d", h.type);
-	LOG_INF("mc %d", h.mcs);
-	LOG_DBG("msg_num %d", h.msg_num);
+	memcpy(&h, data_void, sizeof(h)); // idk why +4, but it works // update, works only for StartTest, not for TestResults ;(((((
+	LOG_INF("type %d", h.type);
+	LOG_INF("mcs %d", h.mcs);
+	LOG_INF("msg_num %d", h.msg_num);
 
 	switch (globals.cur_test_status)
 	{
 	case NotRunning:
 	case Scheduled:
-		if (h.type == StartTest)
-		{
-			LOG_INF("Device ready to take test");
-			globals.tx.devices_in_test++;
-		}
-	case Ended:
-		if (h.type == TestResults)
-		{
-			// LOG_HEXDUMP_INF(data, 50U, "Results hexdump:");
-			// int msg_recieved_inner;
-			LOG_INF("WAAAAAAY");
+		LOG_INF("Device ready to take test");
+		globals.tx.devices_in_test++;
+		break;
 
-			// memcpy(&msg_recieved_inner, data+1, sizeof(msg_recieved_inner));
-			LOG_INF("WAAAAAAY");
-			// LOG_HEXDUMP_INF(msg_recieved_inner, sizeof(msg_recieved_inner), "msg_recieved_inner content:");
-			LOG_INF("Messages recieved: %d", h.msg_num);
-		}
+	case Ended:
+		LOG_INF("Messages recieved: %d", h.msg_num);
+		// List l = list_create();
+		// char str[256] = {};
+		// LOG_INF("1");
+		// list_from_bin(&l, (char *)data_void + sizeof(h), len);
+		// LOG_INF("2");
+		// list_to_string(l, str, 256);
+		// LOG_INF("Missed msg: %s", str);
+		LOG_INF("Missed msg: %s", (char *)data_void + sizeof(h));
+		break;
 	}
 }

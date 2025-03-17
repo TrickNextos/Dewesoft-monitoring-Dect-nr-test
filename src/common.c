@@ -1,10 +1,99 @@
 #include "common.h"
-#include <nrf_modem_dect_phy.h>
+#include <stdlib.h>
 
 K_SEM_DEFINE(operation_sem, 0, 1);
 Globals globals = {};
 
 LOG_MODULE_REGISTER(common, LOG_LEVEL_DBG);
+
+K_HEAP_DEFINE(list_heap, 1024 * 8);
+List list_create() {
+	return (List) {
+		.capacity = 8,
+		.size = 0,
+		.data = (int*) k_heap_alloc(&list_heap, sizeof(int) * 8, K_NO_WAIT),
+	};
+}
+
+void expand_list(List *lst) {
+	int new_capacity = lst->capacity * 2;
+	int* ptr = (int*) k_heap_alloc(&list_heap, sizeof(int) * new_capacity, K_NO_WAIT);
+	if (ptr == NULL) return -1;
+	// LOG_INF("set up ptr old:%d, new: %d", lst->capacity, new_capacity);
+
+	for (int i = 0; i < lst->size; i++) {
+		ptr[i] = lst->data[i];
+	}
+
+	k_heap_free(&list_heap, lst->data);
+	lst->capacity = new_capacity;
+	lst->data = ptr;
+}
+
+int list_append(List *lst, int data) {
+	if (lst->size == lst->capacity) {
+		LOG_INF("helou %d", data);
+		expand_list(lst);
+	}
+
+	lst->data[lst->size] = data;
+	lst->size++;
+	if (lst->size < 15)
+		LOG_DBG("size: %d, cap: %d, num: %d", lst->size, lst->capacity, data);
+	return 0;
+}
+
+int list_to_bin(List l, char* buf, int buf_len) {
+	if (l.size * sizeof(l.data[0]) + 1 > buf_len)
+		return -1;
+	buf[0] = (char) l.size;
+	memcpy(buf + 1, l.data, l.size * sizeof(l.data[0]));
+	LOG_HEXDUMP_INF(buf, 20, "Bin list");
+	return 0;
+}
+
+int list_from_bin(List *l, char* buf, int buf_len) {
+	list_clear(l);
+	int size = buf[0];
+	if (buf_len - 1 < size * sizeof(l->data[0]))
+		return -1;
+	while (size < l->size) {
+		expand_list(l);
+	}
+
+	memcpy(l->data, buf + 1, size * sizeof(l->data[0]));
+	return 0;
+}
+
+int list_to_string(List l, char* buf, int buf_len) {
+	if (buf_len < 3)
+		return -1;
+	
+	int buf_progress = 1;
+	buf[0] = '[';
+
+	for (int i = 0; i < l.size; i++) {
+		if (buf_progress >= buf_len - 1)
+			return -2;
+		buf_progress += sprintf(buf + buf_progress, i != 0 ? ", %d" : "%d", list_get(&l, i));
+	}
+	buf[buf_progress] = ']';
+	buf[buf_progress + 1] = '\0';
+	return 0;
+}
+
+int list_get(List *lst, int ix) {
+	if (0 <= ix && ix <= lst->size) {
+		return lst->data[ix];
+	}
+	return INT_MIN;
+}
+
+void list_clear(List *lst) {
+	lst->size = 0;
+}
+
+
 
 /* Send operation. */
 int transmit(uint32_t handle, void *data, size_t data_len, int mcs)

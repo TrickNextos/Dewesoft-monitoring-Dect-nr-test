@@ -33,18 +33,25 @@ typedef struct {
 	uint8_t devices_in_test;
 } TransmitGlobals;
 
+typedef struct List {
+	int *data;
+	int capacity;
+	int size;
+} List;
+
 typedef struct {
 	uint16_t num_recv;
 	bool respond_to_test_start_as_rx;
 	bool send_statistics_back;
 	uint16_t last_msg_number;
+	List missed_msg;
 } RecieveGlobals;
 
 
 typedef struct {
-    uint16_t seconds;
-    uint8_t mcs;
-	uint16_t msg_to_send;
+    int times;
+    int mcs;
+	int msg_to_send;
 } TestSettings;
 
 enum TestStatus
@@ -95,6 +102,7 @@ typedef struct {
 	TransmitGlobals tx;
 	uint16_t device_id;
 	enum TestStatus cur_test_status;
+	TestSettings test_settings;
 	bool is_rx;
 	bool has_sent;
 } Globals;
@@ -103,6 +111,15 @@ extern Globals globals;
 
 int transmit(uint32_t handle, void *data, size_t data_len, int mcs);
 int receive(uint32_t handle, uint32_t duration_ms);
+
+List list_create();
+int list_append(List *lst, int data);
+int list_get(List *lst, int ix);
+int list_to_string(List l, char* buf, int buf_len);
+int list_to_bin(List l, char* buf, int buf_len);
+int list_from_bin(List *l, char* buf, int buf_len);
+void list_clear(List *lst);
+
 
 extern const int mcs_subslots_size[MAX_MCS + 1][MAX_NUM_OF_SUBSLOTS + 1];
 

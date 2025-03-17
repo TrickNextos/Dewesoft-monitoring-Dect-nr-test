@@ -1,11 +1,14 @@
 #include "recieve.h"
 
-LOG_MODULE_REGISTER(recieve, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(recieve, LOG_LEVEL_INF);
+
 
 void handle_rx_pdc(const uint64_t *time, const struct nrf_modem_dect_phy_rx_pdc_status *status, const void *data_void, uint32_t len) {
     // LOG_INF("handle_rx_pdc");
 
 	char* data = (char *)data_void;
+
+	set_led((globals.rx.last_msg_number % 50) < 40);
 
 	// int64_t current_time = k_uptime_get();
 	TestHeader h = {};
@@ -28,8 +31,10 @@ void handle_rx_pdc(const uint64_t *time, const struct nrf_modem_dect_phy_rx_pdc_
 			if (globals.rx.last_msg_number == 0) {
 				LOG_INF("Single msg size %d B", len);
 			}
-			while (++globals.rx.last_msg_number < h.msg_num) {
+			while (globals.rx.last_msg_number++ < h.msg_num) {
 				LOG_ERR("Missed package %d", globals.rx.last_msg_number-1);
+				list_append(&(globals.rx.missed_msg), globals.rx.last_msg_number-1);
+				LOG_INF("after append");
 			}
 			globals.rx.num_recv++;
 		}
@@ -54,8 +59,11 @@ void start_rx_test(char tx_buf[]){
 		.type = StartTest,
 	};
 
+	// stop 10s long rx, so it can send back participation data
+	// nrf_modem_dect_phy_rx_stop(RX_HANDLE);
+
 	LOG_DBG("type %d", h.type);
-	LOG_DBG("mc %d", h.mcs);
+	LOG_DBG("mcs %d", h.mcs);
 	LOG_DBG("msg_num %d", h.msg_num);
 
 	memcpy(tx_buf, &h, sizeof(h));
@@ -65,7 +73,7 @@ void start_rx_test(char tx_buf[]){
 	memcpy(&h1, tx_buf, sizeof(h1));
 
 	LOG_DBG("type %d", h1.type);
-	LOG_DBG("mc %d", h1.mcs);
+	LOG_DBG("mcs %d", h1.mcs);
 	LOG_DBG("msg_num %d", h1.msg_num);
 
 	transmit(TX_HANDLE, &tx_buf, 100, 2);
@@ -74,7 +82,6 @@ void start_rx_test(char tx_buf[]){
 }
 
 void end_rx_test(char tx_buf[]){
-	LOG_INF("Sending statistics");
 	// struct StatisticsResults {
 	// 	int num_of_tx_recieved;
 	// 	uint16_t device_id;
@@ -91,17 +98,26 @@ void end_rx_test(char tx_buf[]){
 	// memcpy(tx_buf+1, &res, sizeof(res));
 	LOG_DBG("msg rec: %d", globals.rx.num_recv);
 
+	set_led(1);
+
 	TestHeader h = {
 		.type = TestResults,
 		.mcs = 0,
 		.msg_num = globals.rx.num_recv,
 	};
+
+	// stop 10s long rx, so it can send back statistics data
+	// nrf_modem_dect_phy_rx_stop(RX_HANDLE);
+
 	memcpy(tx_buf, &h, sizeof(h));
-	transmit(TX_HANDLE, (void *)tx_buf, 100, 2);
+	int err = list_to_string(globals.rx.missed_msg, tx_buf + sizeof(h), MAX_DATA_LEN - sizeof(h));
+	if (err != 0) LOG_ERR("Err %d", err);
 	LOG_INF("Sending statistics");
+	transmit(TX_HANDLE, (void *)tx_buf, 100, 2);
 
 	globals.rx.num_recv = 0;
 	globals.rx.last_msg_number = 0;
+	list_clear(&globals.rx.missed_msg);
 
 	/* Wait for TX operation to complete. */
 	k_sem_take(&operation_sem, K_FOREVER);

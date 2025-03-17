@@ -2,6 +2,8 @@
 #define _RECIEVE_H
 
 #include "common.h"
+#include "init.h"
+// #include <nrf_modem/include/nrf_modem_dect_phy.h>
 
 void handle_rx_pdc(const uint64_t *time,
 				const struct nrf_modem_dect_phy_rx_pdc_status *status,

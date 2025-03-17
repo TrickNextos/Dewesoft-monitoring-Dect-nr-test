@@ -268,7 +268,8 @@ int main(void)
 	if (modem_init(&dect_phy_callbacks, &dect_phy_init_params, globals.device_id, &operation_sem) >= 0) return 0;
 	// if (uart_setup() >= 0) return 0;
 	uart_setup();
-	LOG_INF("uart_buf_len: %d", UART_BUF_LEN);
+
+	globals.rx.missed_msg = list_create();
 
 	LOG_INF("Initialization complete");
 
@@ -276,70 +277,85 @@ int main(void)
 	k_timer_start(&rxtx_timer, K_MSEC(1000), K_NO_WAIT);
 	// memset(tx_buf, ':', MAX_DATA_LEN*sizeof(tx_buf[0]));
 	// tx_buf[MAX_DATA_LEN-1] = '0';
-	while (!globals.is_rx)
-	{
-		int button_state;
-		int prev_button_state = 0;
-		button_state = read_button();
-		if (prev_button_state != button_state && globals.cur_test_status == NotRunning)
+
+	int button_state;
+	int prev_button_state = 0;
+	while (1) {
+		while (!globals.is_rx)
 		{
-			prev_button_state = button_state;
-			if (button_state != 1)
+		set_led(0);
+
+			switch (globals.cur_test_status) {
+				case NotRunning:
+					// you can schedule 10 same tests, to run in a row
+					if (globals.test_settings.times > 0) {
+						globals.cur_test_status = Scheduled;
+						globals.test_settings.times--;
+					}
+
+					// schedule the test with some default parameters when button1 is pressed
+					button_state = read_button();
+					if (prev_button_state != button_state) {
+						prev_button_state = button_state;
+						if (button_state != 1)
+						{
+							continue;
+						}
+						globals.cur_test_status = Scheduled;
+						globals.test_settings = (TestSettings) {
+							.mcs = 4,
+							.msg_to_send = 2000,
+							.times = 1,
+						};
+					}
+					break;
+
+				case Scheduled:
+					globals.has_sent = true;
+
+					// change pdc (data) callback, because the device will be in tx mode
+					dect_phy_callbacks.pdc = handle_tx_pdc;
+					err = nrf_modem_dect_phy_callback_set(&dect_phy_callbacks);
+					if (err)
+					{
+						LOG_ERR("nrf_modem_dect_phy_init failed, err %d", err);
+						return err;
+					}
+
+					LOG_INF("Starting TX test");
+					err = start_test_tx(&globals.test_settings, tx_buf);
+					if (err != 0) {
+						LOG_ERR("start_test_tx err %d", err);
+					}
+					globals.cur_test_status = NotRunning;
+			}
+		}
+
+
+		set_led(1);
+		LOG_INF("Recieving msg!");
+		while (globals.is_rx)
+		{
+			if (globals.rx.respond_to_test_start_as_rx)
 			{
+				globals.rx.respond_to_test_start_as_rx = false;
+				start_rx_test(tx_buf);
+			}
+			else if (globals.rx.send_statistics_back)
+			{
+				globals.rx.send_statistics_back = false;
+				end_rx_test(tx_buf);
+			}
+
+			err = receive(RX_HANDLE, 2000);
+			if (err != 0)
+			{
+				LOG_ERR("Error during receiving %d", err);
 				continue;
 			}
-
-			dect_phy_callbacks.pdc = handle_tx_pdc;
-			err = nrf_modem_dect_phy_callback_set(&dect_phy_callbacks);
-			if (err)
-			{
-				LOG_ERR("nrf_modem_dect_phy_init failed, err %d", err);
-				return err;
-			}
-			// err = nrf_modem_dect_phy_init(dect_phy_init_params);
-
-			globals.has_sent = true;
-
-			LOG_INF("Starting TX test");
-			// gpio_pin_set_dt(&led, 1);
-			// start_test_tx(4, 10 * MSEC_PER_SEC);
-			TestSettings set = {
-				.mcs = 4,
-				.seconds = 15,
-				.msg_to_send = 2000,
-			};
-			err = start_test_tx(&set, tx_buf);
-			if (err < 0) {
-				LOG_ERR("start_test_tx err %d", err);
-			}
-			// gpio_pin_set_dt(&led, 0);
+			/* Wait for RX operation to complete. */
+			k_sem_take(&operation_sem, K_FOREVER);
 		}
-	}
-
-
-	LOG_INF("Recieving msg!");
-	set_led(1);
-	while (1)
-	{
-		if (globals.rx.respond_to_test_start_as_rx)
-		{
-			globals.rx.respond_to_test_start_as_rx = false;
-			start_rx_test(tx_buf);
-		}
-		else if (globals.rx.send_statistics_back)
-		{
-			globals.rx.send_statistics_back = false;
-			end_rx_test(tx_buf);
-		}
-
-		err = receive(RX_HANDLE, 1000);
-		if (err != 0)
-		{
-			LOG_ERR("Error during receiving %d", err);
-			continue;
-		}
-		/* Wait for RX operation to complete. */
-		k_sem_take(&operation_sem, K_FOREVER);
 	}
 
 	LOG_INF("Shutting down");
